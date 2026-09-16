@@ -1,0 +1,258 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>Requirement Builder</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Source+Serif+4:opsz,wght@8..60,500;8..60,600&family=Inter:wght@400;500;600;700&family=IBM+Plex+Mono:wght@400;500;600&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
+</head>
+<body>
+
+
+<div class="shell">
+  <div class="main">
+    <div class="brand-row">
+      <h1>Requirement Builder</h1>
+      <span class="tag">typeUD requirement JSON</span>
+      <div class="spacer"></div>
+      <button class="btn-ghost" onclick="triggerImport()">Import JSON</button>
+      <input type="file" id="importFileInput" accept="application/json" style="display:none" onchange="handleImportFile(event)" />
+      <button class="btn-ghost" onclick="downloadAllTabs()">Download All Tabs</button>
+      <button class="btn-reset" onclick="resetAll()">Reset</button>
+    </div>
+    <div class="tabs-bar" id="tabsBar"></div>
+    <div class="form-col" id="formRoot">
+      <!-- STEP 1 -->
+      <div class="step" id="step1">
+        <div class="step-num">1</div>
+        <div class="step-body">
+          <div class="step-title">Basic details</div>
+          <div class="step-sub">The identity of this requirement — how it's named, tracked, and categorized.</div>
+
+          <div class="field">
+            <label class="f-label">Name</label>
+            <input type="text" data-path="basic.name" data-rerender="behaviorPanel" value="" placeholder="e.g. HIPAA &amp; Patient Privacy/Appropriate Handling of PHI" />
+            <div class="hint">Used as the requirement name and default label.</div>
+          </div>
+
+          <div class="grid2">
+            <div class="field">
+              <label class="f-label">Short name</label>
+              <input type="text" class="mono" data-path="basic.shortname" value="" placeholder="e.g. hipaa-phi" />
+            </div>
+            <div class="field">
+              <label class="f-label">Version</label>
+              <input type="number" data-path="basic.version" value="0" />
+            </div>
+          </div>
+
+          <div class="field">
+            <label class="f-label">Category</label>
+            <select data-path="basic.categorySelect" data-rerender="behaviorPanel" id="categorySelect">
+              <option value="Attestation">Attestation</option>
+              <option value="TB">TB</option>
+              <option value="Immunization">Immunization</option>
+              <option value="Training">Training</option>
+              <option value="Background Check">Background Check</option>
+              <option value="Other">Other (custom)</option>
+            </select>
+            <div id="categoryCustomWrap" style="display:none; margin-top:8px;">
+              <input type="text" data-path="basic.categoryCustom" data-rerender="behaviorPanel" placeholder="Custom category name" />
+            </div>
+            <div class="hint">Selecting <b>TB</b> switches step 3 to the TB test-panel builder automatically.</div>
+          </div>
+
+          <div class="switch-row">
+            <span class="bool-radio">
+              <label class="rlabel"><input type="radio" name="r_basic_active" data-path="basic.active" value="true" checked />True</label>
+              <label class="rlabel"><input type="radio" name="r_basic_active" data-path="basic.active" value="false" />False</label>
+            </span>
+            <span class="switch-label">Active<small>Whether this requirement is currently in use</small></span>
+          </div>
+          <div class="switch-row">
+            <span class="bool-radio">
+              <label class="rlabel"><input type="radio" name="r_basic_required" data-path="basic.required" value="true" checked />True</label>
+              <label class="rlabel"><input type="radio" name="r_basic_required" data-path="basic.required" value="false" />False</label>
+            </span>
+            <span class="switch-label">Required<small>Whether users must complete this requirement</small></span>
+          </div>
+        </div>
+      </div>
+
+      <!-- STEP 2 -->
+      <div class="step">
+        <div class="step-num">2</div>
+        <div class="step-body">
+          <div class="step-title">Guidelines</div>
+          <div class="step-sub">Instructions shown to each audience, plus template and sample files they can reference.</div>
+
+          <div class="card">
+            <div class="card-title">Audience</div>
+            <div class="chk" style="margin-right:16px;">
+              <span class="bool-radio">
+                <label class="rlabel"><input type="radio" name="r_audienceStudent" id="audienceStudentChkTrue" onchange="toggleUserType('student', true)"/>True</label>
+                <label class="rlabel"><input type="radio" name="r_audienceStudent" id="audienceStudentChkFalse" onchange="toggleUserType('student', false)" checked/>False</label>
+              </span>
+              <span style="margin-left:8px;">Student</span>
+            </div>
+            <div class="chk">
+              <span class="bool-radio">
+                <label class="rlabel"><input type="radio" name="r_audienceInstructor" id="audienceInstructorChkTrue" onchange="toggleUserType('clinicalinstructor', true)"/>True</label>
+                <label class="rlabel"><input type="radio" name="r_audienceInstructor" id="audienceInstructorChkFalse" onchange="toggleUserType('clinicalinstructor', false)" checked/>False</label>
+              </span>
+              <span style="margin-left:8px;">Clinical Instructor</span>
+            </div>
+            <div class="hint" style="margin-top:8px;">Select one, or both. The guideline text below is saved under the JSON key <b>student</b> or <b>clinicalInstructor</b> to match &mdash; selecting both downloads two separate requirement JSON files (as a .zip), each with its own key, its own FAAS form ID (Step 3), and the same Reviewer guidelines.</div>
+          </div>
+
+          <div class="card">
+            <div class="card-title"><span id="primaryGuidelinesLabel">Student / Clinical Instructor guidelines</span> <span class="sub">JSON key: student or clinicalInstructor, based on Audience above</span></div>
+            <div class="editor-wrap">
+              <div class="editor-toolbar">
+                <button type="button" title="Bold" onmousedown="event.preventDefault()" onclick="formatDoc('bold','studentEditor')"><b>B</b></button>
+                <button type="button" title="Italic" onmousedown="event.preventDefault()" onclick="formatDoc('italic','studentEditor')"><i>I</i></button>
+                <button type="button" title="Underline" onmousedown="event.preventDefault()" onclick="formatDoc('underline','studentEditor')"><u>U</u></button>
+                <button type="button" title="Bullet list" onmousedown="event.preventDefault()" onclick="formatDoc('insertUnorderedList','studentEditor')">&#8226; List</button>
+                <button type="button" title="Numbered list" onmousedown="event.preventDefault()" onclick="formatDoc('insertOrderedList','studentEditor')">1. List</button>
+                <button type="button" title="Decrease indent" onmousedown="event.preventDefault()" onclick="formatDoc('outdent','studentEditor')">&larr;</button>
+                <button type="button" title="Increase indent / nest list" onmousedown="event.preventDefault()" onclick="formatDoc('indent','studentEditor')">&rarr;</button>
+                <button type="button" title="Link" onmousedown="event.preventDefault()" onclick="formatLink('studentEditor')">Link</button>
+              </div>
+              <div class="rte" id="studentEditor" contenteditable="true" data-path="guidelines.studentHTML" data-placeholder="Guidance shown to the selected audience..."></div>
+            </div>
+            <div class="hint" style="margin-top:6px;">Tip: press Tab inside a list item to nest it one level deeper, Shift+Tab to un-nest.</div>
+          </div>
+
+          <div class="card" id="instructorGuidelinesCard" hidden>
+            <div class="card-title">Clinical Instructor guidelines <span class="sub">JSON key: clinicalInstructor &middot; shown because both audiences are selected</span></div>
+            <div class="editor-wrap">
+              <div class="editor-toolbar">
+                <button type="button" title="Bold" onmousedown="event.preventDefault()" onclick="formatDoc('bold','instructorEditor')"><b>B</b></button>
+                <button type="button" title="Italic" onmousedown="event.preventDefault()" onclick="formatDoc('italic','instructorEditor')"><i>I</i></button>
+                <button type="button" title="Underline" onmousedown="event.preventDefault()" onclick="formatDoc('underline','instructorEditor')"><u>U</u></button>
+                <button type="button" title="Bullet list" onmousedown="event.preventDefault()" onclick="formatDoc('insertUnorderedList','instructorEditor')">&#8226; List</button>
+                <button type="button" title="Numbered list" onmousedown="event.preventDefault()" onclick="formatDoc('insertOrderedList','instructorEditor')">1. List</button>
+                <button type="button" title="Decrease indent" onmousedown="event.preventDefault()" onclick="formatDoc('outdent','instructorEditor')">&larr;</button>
+                <button type="button" title="Increase indent / nest list" onmousedown="event.preventDefault()" onclick="formatDoc('indent','instructorEditor')">&rarr;</button>
+                <button type="button" title="Link" onmousedown="event.preventDefault()" onclick="formatLink('instructorEditor')">Link</button>
+              </div>
+              <div class="rte" id="instructorEditor" contenteditable="true" data-path="guidelines.instructorHTML" data-placeholder="Guidance shown to the Clinical Instructor audience..."></div>
+            </div>
+            <div class="hint" style="margin-top:6px;">Tip: press Tab inside a list item to nest it one level deeper, Shift+Tab to un-nest.</div>
+          </div>
+
+          <div class="card">
+            <div class="card-title">Reviewer guidelines <span class="sub">saved as HTML &middot; JSON key: reviewer &middot; always included</span></div>
+            <div class="editor-wrap">
+              <div class="editor-toolbar">
+                <button type="button" title="Bold" onmousedown="event.preventDefault()" onclick="formatDoc('bold','reviewerEditor')"><b>B</b></button>
+                <button type="button" title="Italic" onmousedown="event.preventDefault()" onclick="formatDoc('italic','reviewerEditor')"><i>I</i></button>
+                <button type="button" title="Underline" onmousedown="event.preventDefault()" onclick="formatDoc('underline','reviewerEditor')"><u>U</u></button>
+                <button type="button" title="Bullet list" onmousedown="event.preventDefault()" onclick="formatDoc('insertUnorderedList','reviewerEditor')">&#8226; List</button>
+                <button type="button" title="Numbered list" onmousedown="event.preventDefault()" onclick="formatDoc('insertOrderedList','reviewerEditor')">1. List</button>
+                <button type="button" title="Decrease indent" onmousedown="event.preventDefault()" onclick="formatDoc('outdent','reviewerEditor')">&larr;</button>
+                <button type="button" title="Increase indent / nest list" onmousedown="event.preventDefault()" onclick="formatDoc('indent','reviewerEditor')">&rarr;</button>
+                <button type="button" title="Link" onmousedown="event.preventDefault()" onclick="formatLink('reviewerEditor')">Link</button>
+              </div>
+              <div class="rte" id="reviewerEditor" contenteditable="true" data-path="guidelines.reviewerHTML" data-placeholder="Guidance shown to the reviewer..."></div>
+            </div>
+            <div class="hint" style="margin-top:6px;">Tip: press Tab inside a list item to nest it one level deeper, Shift+Tab to un-nest.</div>
+          </div>
+
+          <div class="card">
+            <div class="card-title">Templates</div>
+            <div class="field">
+              <label class="f-label">Collection ID</label>
+              <input type="text" class="mono" data-path="guidelines.templates.collectionId" placeholder="collection id (optional)" />
+            </div>
+            <div id="filesTemplates"></div>
+          </div>
+
+          <div class="card">
+            <div class="card-title">Samples</div>
+            <div class="field">
+              <label class="f-label">Collection ID</label>
+              <input type="text" class="mono" data-path="guidelines.samples.collectionId" placeholder="collection id (optional)" />
+            </div>
+            <div class="chk" style="margin-bottom:10px;">
+              <span class="bool-radio">
+                <label class="rlabel"><input type="radio" name="r_samples_useFiles" data-path="guidelines.samples.useFiles" data-rerender="filesSamples" value="true" />True</label>
+                <label class="rlabel"><input type="radio" name="r_samples_useFiles" data-path="guidelines.samples.useFiles" data-rerender="filesSamples" value="false" checked />False</label>
+              </span>
+              <span style="margin-left:8px;">Attach sample files (leave off to keep <span class="req-badge" style="margin-left:2px;">files: null</span>)</span>
+            </div>
+            <div id="filesSamples"></div>
+          </div>
+        </div>
+      </div>
+
+      <!-- STEP 3 -->
+      <div class="step">
+        <div class="step-num">3</div>
+        <div class="step-body">
+          <div class="step-title">Requirement behavior</div>
+          <div class="step-sub">What the user fills in, whether it expires, and how.</div>
+          <div id="behaviorPanel"></div>
+        </div>
+      </div>
+
+      <!-- STEP 4 -->
+      <div class="step">
+        <div class="step-num">4</div>
+        <div class="step-body">
+          <div class="step-title">Tags</div>
+          <div class="step-sub">Controls when this requirement becomes due and who it applies to.</div>
+          <div id="tagsPanel"></div>
+        </div>
+      </div>
+
+      <!-- STEP 5 -->
+      <div class="step">
+        <div class="step-num">5</div>
+        <div class="step-body">
+          <div class="step-title">Workflow</div>
+          <div class="step-sub">Approval routing after submission.</div>
+          <div class="switch-row">
+            <span class="bool-radio">
+              <label class="rlabel"><input type="radio" name="r_workflow_keep" data-path="workflow.keep" data-rerender="behaviorPanelNoop" value="true" checked />True</label>
+              <label class="rlabel"><input type="radio" name="r_workflow_keep" data-path="workflow.keep" data-rerender="behaviorPanelNoop" value="false" />False</label>
+            </span>
+            <span class="switch-label">Auto Approved<small>On: Pending Review &rarr; Approved. Off: the workflow block is removed entirely.</small></span>
+          </div>
+        </div>
+      </div>
+
+      <!-- STEP 6 -->
+      <div class="step">
+        <div class="step-num">6</div>
+        <div class="step-body">
+          <div class="step-title">Carry-forward</div>
+          <div class="step-sub">Whether a completed requirement carries forward to the next period.</div>
+          <div id="carryPanel"></div>
+        </div>
+      </div>
+
+    </div>
+  </div>
+
+  <div class="preview-col" id="previewCol">
+    <div class="preview-head">
+      <span class="dot"></span>
+      <h2>JSON output</h2>
+      <div class="spacer"></div>
+      <button class="icon-action" onclick="copyJSON()">Copy</button>
+      <button class="icon-action primary" onclick="downloadJSON()">Download</button>
+    </div>
+    <div class="validation" id="validationBox"></div>
+    <div class="preview-body"><pre id="jsonOut"></pre></div>
+  </div>
+</div>
+
+<button class="mobile-toggle" id="mobileToggle" onclick="toggleMobilePreview()">View JSON</button>
+
+
+<script src="{{ url_for('static', filename='app.js') }}"></script>
+</body>
+</html>
