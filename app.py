@@ -187,17 +187,19 @@ def build_standard_custom(state, audience=None):
     custom["expiryDate"] = expiry_date_for(s)
 
     etype = s.get("expiryType")
+    # The expiryLogic True/False choices made in the UI are honored, except
+    # where the expiry type itself makes the field mandatory.
+    expiry_logic = dict(s["expiryLogic"])
+    if expiry_logic.get("required"):
+        expiry_logic["enabled"] = True
     if etype == "period":
-        # Fixed days from result date -> resultDate becomes mandatory, expiryLogic unused
-        expiry_logic = {**s["expiryLogic"], "required": False, "enabled": False}
+        # Fixed days from result date -> resultDate becomes mandatory
         result_date = {**s["resultDate"], "required": True, "enabled": True}
     elif etype == "userEntered":
         # Date inserted by user -> expiryLogic becomes mandatory
-        expiry_logic = {**s["expiryLogic"], "required": True, "enabled": True}
+        expiry_logic = {**expiry_logic, "required": True, "enabled": True}
         result_date = s["resultDate"]
     else:
-        # predefined fixed date / no expiry
-        expiry_logic = {**s["expiryLogic"], "required": False, "enabled": False}
         result_date = s["resultDate"]
 
     custom["expiryLogic"] = field_out(expiry_logic)

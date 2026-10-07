@@ -215,8 +215,8 @@ function reqEnabledPair(basePath, name, cfg, opts){
       <span class="name">${name}${opts.badge ? '<span class="req-badge">'+opts.badge+'</span>' : ''}</span>
     </div>
     <div class="pair-boxes">
-      <span class="f-label">Required</span>${boolRadio(`${basePath}.required`, cfg.required, {requiredFor:`${basePath}.enabled`, rerender:opts.rerender})}
-      <span class="f-label">Enabled</span>${boolRadio(`${basePath}.enabled`, cfg.enabled, {disabled: cfg.required})}
+      <span class="f-label">Required</span>${boolRadio(`${basePath}.required`, cfg.required, {requiredFor:`${basePath}.enabled`, rerender:opts.rerender, disabled: opts.locked})}
+      <span class="f-label">Enabled</span>${boolRadio(`${basePath}.enabled`, cfg.enabled, {disabled: cfg.required || opts.locked})}
     </div>
     <input type="text" data-path="${basePath}.label" value="${escapeAttr(cfg.label)}" placeholder="Field label" />
   </div>`;
@@ -305,7 +305,7 @@ function renderStandardPanel(){
     <div class="card">
       <div class="card-title">Expiry logic</div>
       ${expiryTypeBlock('behavior.standard', s, {rerender:'behaviorPanel', periodNote:'Result date above is automatically set to required + enabled for this type.'})}
-      ${reqEnabledPair('behavior.standard.expiryLogic','Expiry logic field', s.expiryLogic, {rerender:'behaviorPanel'})}
+      ${reqEnabledPair('behavior.standard.expiryLogic','Expiry logic field', s.expiryLogic, {rerender:'behaviorPanel', locked: s.expiryType==='userEntered'})}
     </div>
   `;
 }
@@ -452,6 +452,7 @@ function renderTagsPanel(){
         <div class="field"><label class="f-label">Phase</label>
           <select data-path="tags.dueOn.phase">
             <option value="start" ${t.dueOn.phase==='start'?'selected':''}>start</option>
+            <option value="middle" ${t.dueOn.phase==='middle'?'selected':''}>middle</option>
             <option value="end" ${t.dueOn.phase==='end'?'selected':''}>end</option>
           </select>
         </div>
@@ -480,6 +481,7 @@ function renderTagsPanel(){
         <div class="field"><label class="f-label">Phase</label>
           <select data-path="tags.publishOn.phase">
             <option value="start" ${t.publishOn.phase==='start'?'selected':''}>start</option>
+            <option value="middle" ${t.publishOn.phase==='middle'?'selected':''}>middle</option>
             <option value="end" ${t.publishOn.phase==='end'?'selected':''}>end</option>
           </select>
         </div>
@@ -691,11 +693,18 @@ function handleFieldEvent(e){
   const path = el.dataset ? el.dataset.path : null;
   if(!path) return;
   let value;
-  if(el.isContentEditable){ value = el.innerHTML; }
+  if(el.isContentEditable){ value = sanitizeHTML(el.innerHTML); }
   else if(el.type === 'checkbox'){ value = el.checked; }
   else if(el.type === 'radio'){ if(!el.checked) return; value = el.value === 'true'; }
   else { value = el.value; }
   setState(path, value);
+
+  // "Date entered by user" forces the expiry logic field to required + enabled.
+  if(path.endsWith('.expiryType') && value === 'userEntered'){
+    const base = path.slice(0, -'.expiryType'.length);
+    setState(base + '.expiryLogic.required', true);
+    setState(base + '.expiryLogic.enabled', true);
+  }
 
   if(el.dataset.requiredFor && ((el.type === 'checkbox' && el.checked) || (el.type === 'radio' && value === true))){
     setState(el.dataset.requiredFor, true);
@@ -709,12 +718,72 @@ formRoot.addEventListener('input', handleFieldEvent);
 formRoot.addEventListener('change', handleFieldEvent);
 
 /* rich text helpers */
+
+/* Reduces any HTML to only: b, i, u, ul, ol, li, a[href] (+ br for line breaks).
+   Everything else (div, p, span, styles, classes, ...) is unwrapped or dropped. */
+function sanitizeHTML(html){
+  const BLOCK = new Set(['DIV','P','H1','H2','H3','H4','H5','H6','BLOCKQUOTE','PRE','TABLE','TR','SECTION','ARTICLE','HEADER','FOOTER','FIGURE','DL','DT','DD','ADDRESS']);
+  const DROP = new Set(['SCRIPT','STYLE','HEAD','TEMPLATE','NOSCRIPT','IFRAME','OBJECT']);
+  const endsBreak = s => /(<br>|<\/ul>|<\/ol>)$/.test(s);
+  const wrap = (tag, c) => c.trim() ? `<${tag}>${c}</${tag}>` : c;
+
+  function children(node){
+    const isList = node.nodeName === 'UL' || node.nodeName === 'OL';
+    let acc = '';
+    node.childNodes.forEach(ch=>{
+      if(isList && ch.nodeType === 3 && !ch.nodeValue.trim()) return;
+      const out = walk(ch);
+      if(!out) return;
+      if(ch.nodeType === 1 && BLOCK.has(ch.nodeName) && acc && !endsBreak(acc)) acc += '<br>';
+      acc += out;
+    });
+    return acc;
+  }
+  function walk(n){
+    if(n.nodeType === 3){
+      return n.nodeValue.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/\s+/g,' ');
+    }
+    if(n.nodeType !== 1) return '';
+    const tag = n.nodeName;
+    if(DROP.has(tag)) return '';
+    const c = children(n);
+    const st = (n.getAttribute('style') || '').toLowerCase();
+    switch(tag){
+      case 'B': case 'STRONG':
+        return /font-weight:\s*(normal|400)/.test(st) ? c : wrap('b', c);
+      case 'I': case 'EM': return wrap('i', c);
+      case 'U': return wrap('u', c);
+      case 'UL': case 'OL': return c.includes('<li>') ? `<${tag.toLowerCase()}>${c}</${tag.toLowerCase()}>` : c;
+      case 'LI': return `<li>${c.replace(/(<br>)+$/,'')}</li>`;
+      case 'BR': return '<br>';
+      case 'A': {
+        const href = (n.getAttribute('href') || '').trim();
+        return /^(https?:|mailto:)/i.test(href) && c.trim()
+          ? `<a href="${href.replace(/&/g,'&amp;').replace(/"/g,'&quot;').replace(/</g,'&lt;')}">${c}</a>` : c;
+      }
+    }
+    let out = c;
+    if(tag === 'SPAN'){   // Word / Google Docs express bold/italic/underline via span styles
+      if(/font-weight:\s*(bold|[6-9]00)/.test(st)) out = wrap('b', out);
+      if(/font-style:\s*italic/.test(st)) out = wrap('i', out);
+      if(/text-decoration[^;]*underline/.test(st)) out = wrap('u', out);
+    }
+    if(BLOCK.has(tag) && out.trim() && !endsBreak(out)) out += '<br>';
+    return out;
+  }
+
+  const body = new DOMParser().parseFromString(html || '', 'text/html').body;
+  return children(body).replace(/^(\s|<br>)+|(\s|<br>)+$/g, '').replace(/(<br>){3,}/g, '<br><br>');
+}
+function syncEditor(editor){
+  setState(editor.dataset.path, sanitizeHTML(editor.innerHTML));
+  updatePreview();
+}
 function formatDoc(cmd, editorId){
   const editor = document.getElementById(editorId);
   editor.focus();
   document.execCommand(cmd, false, null);
-  setState(editor.dataset.path, editor.innerHTML);
-  updatePreview();
+  syncEditor(editor);
 }
 function formatLink(editorId){
   const editor = document.getElementById(editorId);
@@ -722,18 +791,34 @@ function formatLink(editorId){
   if(!url) return;
   editor.focus();
   document.execCommand('createLink', false, url);
-  setState(editor.dataset.path, editor.innerHTML);
-  updatePreview();
+  syncEditor(editor);
 }
 
-/* Tab / Shift+Tab inside an editor nests or un-nests the current list item */
 document.querySelectorAll('.rte').forEach(editor=>{
+  /* Tab / Shift+Tab inside an editor nests or un-nests the current list item */
   editor.addEventListener('keydown', function(e){
     if(e.key !== 'Tab') return;
     e.preventDefault();
     document.execCommand(e.shiftKey ? 'outdent' : 'indent', false, null);
-    setState(editor.dataset.path, editor.innerHTML);
-    updatePreview();
+    syncEditor(editor);
+  });
+  /* Pasted content is stripped down to b / i / u / lists / links only */
+  editor.addEventListener('paste', function(e){
+    e.preventDefault();
+    const cd = e.clipboardData || window.clipboardData;
+    const html = cd.getData('text/html');
+    const plain = cd.getData('text/plain');
+    let clean;
+    if(/<\/?[a-z][a-z0-9]*[\s>\/]/i.test(plain)){
+      // Pasted text is HTML source (possibly with \" escapes) — treat it as markup and clean it.
+      clean = sanitizeHTML(plain.replace(/\\(["'])/g, '$1'));
+    } else if(html){
+      clean = sanitizeHTML(html);
+    } else {
+      clean = plain.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/\r?\n/g,'<br>');
+    }
+    document.execCommand('insertHTML', false, clean);
+    syncEditor(editor);
   });
 });
 
@@ -823,9 +908,9 @@ function importRequirementJSON(json){
 
   const g = json.guidelines || {};
   const isInstructorVariant = Array.isArray(g.clinicalInstructor);
-  st.guidelines.studentHTML = isInstructorVariant ? (g.clinicalInstructor[0] || '')
-    : (Array.isArray(g.student) ? (g.student[0] || '') : '');
-  st.guidelines.reviewerHTML = Array.isArray(g.reviewer) ? (g.reviewer[0] || '') : '';
+  st.guidelines.studentHTML = sanitizeHTML(isInstructorVariant ? (g.clinicalInstructor[0] || '')
+    : (Array.isArray(g.student) ? (g.student[0] || '') : ''));
+  st.guidelines.reviewerHTML = sanitizeHTML(Array.isArray(g.reviewer) ? (g.reviewer[0] || '') : '');
   const templates = g.templates || {};
   st.guidelines.templates.collectionId = templates.collectionId || '';
   st.guidelines.templates.files = importFiles(templates.files);
