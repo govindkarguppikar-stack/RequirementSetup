@@ -1,4 +1,4 @@
-<!DOCTYPE html>
+﻿<!DOCTYPE html>
 <html lang="en">
 <head>
 <meta charset="UTF-8" />
@@ -8,21 +8,78 @@
 <link href="https://fonts.googleapis.com/css2?family=Source+Serif+4:opsz,wght@8..60,500;8..60,600&family=Inter:wght@400;500;600;700&family=IBM+Plex+Mono:wght@400;500;600&display=swap" rel="stylesheet">
 <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
 </head>
-<body>
+<body data-view="builder">
 
+<nav class="main-nav">
+  <span class="nav-brand"><span class="logo">R</span><span class="nav-brand-text">Requirement Studio</span></span>
+  <button type="button" class="nav-btn active" data-view="builder" onclick="showView('builder')">Requirement Builder</button>
+  <button type="button" class="nav-btn" data-view="database" onclick="showView('database')">Database <span class="conn-dot" id="connDot"></span></button>
+  <button type="button" class="nav-btn" data-view="gather" onclick="showView('gather')">Requirements Gathering</button>
+  {% if auth_on %}<span class="nav-spacer"></span><form class="nav-signout" method="post" action="/logout"><button type="submit" class="nav-btn" title="Signed in as {{ auth_user }}">Sign out</button></form>{% endif %}
+</nav>
 
-<div class="shell">
+<!-- ============ DATABASE VIEW ============ -->
+<div class="page-view" id="view-database" hidden>
+  <div class="page-wrap narrow">
+    <h1 class="page-title">Database connection</h1>
+    <p class="page-sub">Paste your MongoDB connection string once. With &ldquo;Remember&rdquo; on, it is saved in your computer's secure credential store (never in a plain file or the browser) and reconnects automatically. All queries are read-only.</p>
+    <div class="card">
+      <div class="field">
+        <label class="f-label">MongoDB connection string</label>
+        <input type="password" id="mongoUri" class="mono" autocomplete="off" spellcheck="false" placeholder="mongodb+srv://user:password@cluster.mongodb.net/" onkeydown="if(event.key==='Enter')dbConnect()" />
+      </div>
+      <label class="remember-row"><input type="checkbox" id="dbRemember" checked /> <span>Remember this connection on this computer <small>stored securely in Windows Credential Manager &mdash; reconnects automatically after a refresh or restart</small></span></label>
+      <div class="saved-line" id="dbSaved" hidden></div>
+      <div class="btn-row">
+        <button type="button" class="btn-primary" id="dbConnectBtn" onclick="dbConnect()">Connect</button>
+        <button type="button" class="btn-reset" id="dbDisconnectBtn" onclick="dbDisconnect()" hidden title="Disconnect and delete the saved connection">Disconnect &amp; forget</button>
+        <span class="conn-msg" id="dbMsg"></span>
+      </div>
+    </div>
+    <div class="card" id="dbChecks" hidden></div>
+  </div>
+</div>
+
+<!-- ============ REQUIREMENTS GATHERING VIEW ============ -->
+<div class="page-view" id="view-gather" hidden>
+  <div class="gather-shell">
+    <div class="gather-top">
+      <h1 class="page-title">Requirements Gathering</h1>
+      <div class="search-box">
+        <input type="text" id="siteQuery" placeholder="Search by site name or ID, e.g. H2 Health" onkeydown="if(event.key==='Enter')searchSites()" />
+        <button type="button" class="btn-primary" onclick="searchSites()">Search</button>
+      </div>
+      <span class="conn-msg" id="gatherMsg"></span>
+    </div>
+    <div id="siteResults"></div>
+    <div class="gather-out" id="gatherOut"><div class="gather-empty">Search for a site by name or ID to see its requirements.</div></div>
+  </div>
+</div>
+
+<div class="shell" id="view-builder">
   <div class="main">
     <div class="brand-row">
       <h1>Requirement Builder</h1>
       <span class="tag">typeUD requirement JSON</span>
       <div class="spacer"></div>
+      <input type="text" id="dbReqId" class="req-id-input mono" placeholder="Paste requirement ID" onkeydown="if(event.key==='Enter')loadRequirementFromDb()" />
+      <button class="btn-ghost" onclick="loadRequirementFromDb()" title="Fetch this requirement from the database into a new tab">Load from DB</button>
       <button class="btn-ghost" onclick="triggerImport()">Import JSON</button>
       <input type="file" id="importFileInput" accept="application/json" style="display:none" onchange="handleImportFile(event)" />
       <button class="btn-ghost" onclick="downloadAllTabs()">Download All Tabs</button>
       <button class="btn-reset" onclick="resetAll()">Reset</button>
     </div>
     <div class="tabs-bar" id="tabsBar"></div>
+    <div class="builder-body">
+    <aside class="step-rail" aria-label="Steps">
+      <div class="rail-title">Steps</div>
+      <a class="rail-link active" href="#step1"><span>1</span>Basic details</a>
+      <a class="rail-link" href="#step2"><span>2</span>Guidelines</a>
+      <a class="rail-link" href="#step3"><span>3</span>Behavior</a>
+      <a class="rail-link" href="#step4"><span>4</span>Tags</a>
+      <a class="rail-link" href="#step5"><span>5</span>Workflow</a>
+      <a class="rail-link" href="#step6"><span>6</span>Carry-forward</a>
+    </aside>
     <div class="form-col" id="formRoot">
       <!-- STEP 1 -->
       <div class="step" id="step1">
@@ -49,10 +106,20 @@
           </div>
 
           <div class="field">
+            <label class="f-label">Doc type</label>
+            <select data-path="basic.docType" data-rerender="behaviorPanel" id="docTypeSelect">
+              <option value="ud">ud</option>
+              <option value="tb">tb</option>
+              <option value="influenza">influenza</option>
+            </select>
+            <div class="hint">Saved as <b>docType</b> in the JSON and decides the Requirement behavior builder in step 3 (<b>tb</b> &rarr; TB test panels, <b>influenza</b> &rarr; vaccine + exemption).</div>
+          </div>
+
+          <div class="field">
             <label class="f-label">Category</label>
             <select data-path="basic.categorySelect" data-rerender="behaviorPanel" id="categorySelect">
               <option value="Attestation">Attestation</option>
-              <option value="TB">TB</option>
+              <option value="Health &amp; Immunization">Health &amp; Immunization</option>
               <option value="Immunization">Immunization</option>
               <option value="Training">Training</option>
               <option value="Background Check">Background Check</option>
@@ -61,7 +128,6 @@
             <div id="categoryCustomWrap" style="display:none; margin-top:8px;">
               <input type="text" data-path="basic.categoryCustom" data-rerender="behaviorPanel" placeholder="Custom category name" />
             </div>
-            <div class="hint">Selecting <b>TB</b> switches step 3 to the TB test-panel builder automatically.</div>
           </div>
 
           <div class="switch-row">
@@ -82,7 +148,7 @@
       </div>
 
       <!-- STEP 2 -->
-      <div class="step">
+      <div class="step" id="step2">
         <div class="step-num">2</div>
         <div class="step-body">
           <div class="step-title">Guidelines</div>
@@ -189,7 +255,7 @@
       </div>
 
       <!-- STEP 3 -->
-      <div class="step">
+      <div class="step" id="step3">
         <div class="step-num">3</div>
         <div class="step-body">
           <div class="step-title">Requirement behavior</div>
@@ -199,7 +265,7 @@
       </div>
 
       <!-- STEP 4 -->
-      <div class="step">
+      <div class="step" id="step4">
         <div class="step-num">4</div>
         <div class="step-body">
           <div class="step-title">Tags</div>
@@ -209,7 +275,7 @@
       </div>
 
       <!-- STEP 5 -->
-      <div class="step">
+      <div class="step" id="step5">
         <div class="step-num">5</div>
         <div class="step-body">
           <div class="step-title">Workflow</div>
@@ -225,7 +291,7 @@
       </div>
 
       <!-- STEP 6 -->
-      <div class="step">
+      <div class="step" id="step6">
         <div class="step-num">6</div>
         <div class="step-body">
           <div class="step-title">Carry-forward</div>
@@ -234,6 +300,7 @@
         </div>
       </div>
 
+    </div>
     </div>
   </div>
 
@@ -254,5 +321,8 @@
 
 
 <script src="{{ url_for('static', filename='app.js') }}"></script>
+<script src="{{ url_for('static', filename='gather.js') }}"></script>
 </body>
 </html>
+
+

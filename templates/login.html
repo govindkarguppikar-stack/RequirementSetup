@@ -1,0 +1,28 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>Sign in &middot; Requirement Studio</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=IBM+Plex+Mono:wght@400;500&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
+</head>
+<body class="login-body">
+  <form class="login-card" method="post" autocomplete="on">
+    <div class="login-brand"><span class="logo">R</span> Requirement Studio</div>
+    <h1>Sign in</h1>
+    <p class="login-sub">Enter your credentials to continue.</p>
+    {% if error %}<div class="login-error" role="alert">{{ error }}</div>{% endif %}
+    <div class="field">
+      <label class="f-label" for="username">Username</label>
+      <input type="text" id="username" name="username" autocomplete="username" autofocus required />
+    </div>
+    <div class="field">
+      <label class="f-label" for="password">Password</label>
+      <input type="password" id="password" name="password" autocomplete="current-password" required />
+    </div>
+    <button type="submit" class="btn-primary login-btn">Sign in</button>
+  </form>
+</body>
+</html>
