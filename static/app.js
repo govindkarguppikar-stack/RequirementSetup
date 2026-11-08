@@ -8,7 +8,7 @@
 
 /* ============================= STATE ============================= */
 const defaultState = () => ({
-  basic:{ name:'', shortname:'', version:0, categorySelect:'Attestation', categoryCustom:'', active:true, required:true },
+  basic:{ name:'', shortname:'', version:0, docType:'ud', categorySelect:'Attestation', categoryCustom:'', active:true, required:true },
   guidelines:{
     studentHTML:'', instructorHTML:'', reviewerHTML:'',
     templates:{ collectionId:'', files:[] },
@@ -23,6 +23,24 @@ const defaultState = () => ({
       expiryType:'none', expiryDays:365,
       expiryLogic:{required:false,enabled:false,label:'Expiration Date'},
       fixedDate:{day:1,month:1,year:2027}
+    },
+    flu:{
+      decline:{ enabled:true, label:'Exemption Details', formId:'',
+        expiryType:'none', expiryDays:0, fixedDate:{day:1,month:1,year:2027},
+        expiryLogic:{required:false,enabled:false,label:'Expiration Date'},
+        resultDate:{required:false,enabled:true,label:'Date of Declination'},
+        src:{required:false,enabled:true,label:'Upload'},
+        text:{required:false,enabled:false,label:'Notes'} },
+      vaccine:{ enabled:true, label:'Vaccination Details', formId:'',
+        expiryType:'none', expiryDays:0, fixedDate:{day:1,month:1,year:2027},
+        expiryLogic:{required:false,enabled:false,label:'Expiration Date'},
+        src:{required:false,enabled:true,label:'Upload'},
+        text:{required:false,enabled:false,label:'Notes'},
+        doses:[
+          {date:{required:false,enabled:true,label:'Dose 1 Date'}},
+          {date:{required:false,enabled:false,label:'Dose 2 Date'}},
+          {date:{required:false,enabled:false,label:'Dose 3 Date'}}
+        ] }
     },
     tb:{
       useCustomsKey:false,
@@ -133,7 +151,18 @@ function loadTabs(){
     if(!raw) return false;
     const parsed = JSON.parse(raw);
     if(!parsed || !Array.isArray(parsed.tabs) || !parsed.tabs.length) return false;
-    tabs = parsed.tabs.map(t=>({ id: t.id || genTabId(), state: deepMerge(defaultState(), t.state || {}) }));
+    tabs = parsed.tabs.map(t=>{
+      const s = deepMerge(defaultState(), t.state || {});
+      // Migrate tabs saved before Doc type existed: category "TB" now means docType "tb".
+      if(!(t.state && t.state.basic && t.state.basic.docType)){
+        const cat = s.basic.categorySelect === 'Other' ? (s.basic.categoryCustom||'') : s.basic.categorySelect;
+        if(String(cat).trim().toLowerCase() === 'tb'){
+          s.basic.docType = 'tb';
+          s.basic.categorySelect = 'Other'; s.basic.categoryCustom = 'TB';
+        }
+      }
+      return { id: t.id || genTabId(), state: s };
+    });
     activeTabId = (parsed.activeTabId && tabs.some(t=>t.id===parsed.activeTabId)) ? parsed.activeTabId : tabs[0].id;
     state = tabs.find(t=>t.id===activeTabId).state;
     return true;
@@ -204,7 +233,8 @@ function closeTab(id){
 function getCategory(){
   return state.basic.categorySelect === 'Other' ? (state.basic.categoryCustom||'').trim() : state.basic.categorySelect;
 }
-function isTB(){ return getCategory().trim().toLowerCase() === 'tb'; }
+function isTB(){ return state.basic.docType === 'tb'; }
+function isFlu(){ return state.basic.docType === 'influenza'; }
 
 /* ============================= FIELD PAIR (req/enabled/label) ============================= */
 function reqEnabledPair(basePath, name, cfg, opts){
@@ -258,6 +288,7 @@ function expiryTypeBlock(basePath, cfg, opts){
 /* ============================= STEP 3: BEHAVIOR PANEL ============================= */
 function renderBehaviorPanel(){
   if(isTB()) return renderTBPanel();
+  if(isFlu()) return renderFluPanel();
   return renderStandardPanel();
 }
 
@@ -310,17 +341,20 @@ function renderStandardPanel(){
   `;
 }
 
+/* Shared section builder for TB panels (base = behavior.tb.<key>) and the
+   influenza vaccine / decline sections (opts.base = behavior.flu.<key>). */
 function tbSectionMarkup(key, title, cfg, opts){
   opts = opts || {};
+  const base = opts.base || `behavior.tb.${key}`;
   let extraFields = '';
   if(opts.hasTestType){
-    extraFields += reqEnabledPair(`behavior.tb.${key}.testType`,'Test type', cfg.testType, {rerender:'behaviorPanel'});
+    extraFields += reqEnabledPair(`${base}.testType`,'Test type', cfg.testType, {rerender:'behaviorPanel'});
   }
   if(opts.hasResultDate){
-    extraFields += reqEnabledPair(`behavior.tb.${key}.resultDate`,'Result date', cfg.resultDate, {rerender:'behaviorPanel'});
+    extraFields += reqEnabledPair(`${base}.resultDate`,'Result date', cfg.resultDate, {rerender:'behaviorPanel'});
   }
-  extraFields += reqEnabledPair(`behavior.tb.${key}.src`,'Upload', cfg.src, {rerender:'behaviorPanel'});
-  extraFields += reqEnabledPair(`behavior.tb.${key}.text`,'Notes', cfg.text, {rerender:'behaviorPanel'});
+  extraFields += reqEnabledPair(`${base}.src`,'Upload', cfg.src, {rerender:'behaviorPanel'});
+  extraFields += reqEnabledPair(`${base}.text`,'Notes', cfg.text, {rerender:'behaviorPanel'});
 
   let dosesBlock = '';
   if(opts.hasDoses){
@@ -328,8 +362,8 @@ function tbSectionMarkup(key, title, cfg, opts){
       cfg.doses.map((d,i)=>`
         <div style="border:1px solid var(--line-soft); border-radius:6px; padding:10px; margin-bottom:8px;">
           <div class="hint" style="margin:0 0 6px; font-weight:600; color:var(--ink-soft);">Step ${i+1}</div>
-          ${reqEnabledPair(`behavior.tb.${key}.doses.${i}.date`,'Date', d.date, {rerender:'behaviorPanel'})}
-          ${reqEnabledPair(`behavior.tb.${key}.doses.${i}.induration`,'Induration', d.induration, {rerender:'behaviorPanel'})}
+          ${reqEnabledPair(`${base}.doses.${i}.date`,'Date', d.date, {rerender:'behaviorPanel'})}
+          ${d.induration ? reqEnabledPair(`${base}.doses.${i}.induration`,'Induration', d.induration, {rerender:'behaviorPanel'}) : ''}
         </div>
       `).join('') + `</div>`;
   }
@@ -337,30 +371,39 @@ function tbSectionMarkup(key, title, cfg, opts){
   return `
   <div class="tb-section">
     <div class="tb-section-head">
-      ${boolRadio(`behavior.tb.${key}.enabled`, cfg.enabled, {rerender:'behaviorPanel'})}
+      ${boolRadio(`${base}.enabled`, cfg.enabled, {rerender:'behaviorPanel'})}
       <span class="name">${title}</span>
-      <input class="formid-mini mono" type="text" data-path="behavior.tb.${key}.formId" value="${escapeAttr(cfg.formId)}" placeholder="FAAS form ID"/>
+      <input class="formid-mini mono" type="text" data-path="${base}.formId" value="${escapeAttr(cfg.formId)}" placeholder="FAAS form ID"/>
     </div>
     <div class="tb-section-body ${cfg.enabled?'':'collapsed'}">
       <div class="field" style="margin-top:14px;">
         <label class="f-label">Section label</label>
-        <input type="text" data-path="behavior.tb.${key}.label" value="${escapeAttr(cfg.label)}"/>
+        <input type="text" data-path="${base}.label" value="${escapeAttr(cfg.label)}"/>
       </div>
       ${extraFields}
       ${dosesBlock}
       <div class="pair">
         <div class="pair-head"><span class="name">Expiry</span></div>
-        ${expiryTypeBlock(`behavior.tb.${key}`, cfg, {rerender:'behaviorPanel'})}
-        ${reqEnabledPair(`behavior.tb.${key}.expiryLogic`,'Expiry logic field', cfg.expiryLogic, {rerender:'behaviorPanel'})}
+        ${expiryTypeBlock(base, cfg, {rerender:'behaviorPanel'})}
+        ${reqEnabledPair(`${base}.expiryLogic`,'Expiry logic field', cfg.expiryLogic, {rerender:'behaviorPanel', locked: cfg.expiryType==='userEntered'})}
       </div>
     </div>
   </div>`;
 }
 
+function renderFluPanel(){
+  const f = state.behavior.flu;
+  return `
+    <div class="tb-banner">Doc type <b>influenza</b> &mdash; configure the vaccination and exemption (declination) sections below. They are saved as top-level <span style="font-family:var(--mono);">vaccine</span> and <span style="font-family:var(--mono);">decline</span> objects.</div>
+    ${tbSectionMarkup('vaccine','Vaccination Details', f.vaccine, {base:'behavior.flu.vaccine', hasDoses:true})}
+    ${tbSectionMarkup('decline','Exemption / Declination Details', f.decline, {base:'behavior.flu.decline', hasResultDate:true})}
+  `;
+}
+
 function renderTBPanel(){
   const t = state.behavior.tb;
   return `
-    <div class="tb-banner">TB category selected &mdash; toggle any combination of the four TB test panels below. Each keeps its own FAAS form ID.</div>
+    <div class="tb-banner">Doc type <b>tb</b> selected &mdash; toggle any combination of the four TB test panels below. Each keeps its own FAAS form ID.</div>
     <div class="chk" style="margin-bottom:16px; display:inline-flex; align-items:center;">
       ${boolRadio('behavior.tb.useCustomsKey', t.useCustomsKey, {})}
       <span style="margin-left:8px;">Output these sections as a separate top-level <span style="font-family:var(--mono); margin:0 2px;">customs</span> object instead of <span style="font-family:var(--mono); margin:0 2px;">custom</span></span>
@@ -581,7 +624,7 @@ function validateState(){
   if(isTB()){
     const t = state.behavior.tb;
     if(!t.bloodTest.enabled && !t.chestXray.enabled && !t.symptomScrn.enabled && !t.vaccine.enabled){
-      issues.push('TB category selected but no TB panel is enabled.');
+      issues.push('Doc type is tb but no TB panel is enabled.');
     }
   }
   return issues;
@@ -840,7 +883,7 @@ function resetAll(){
 }
 
 /* ============================= JSON IMPORT (duplicate into a new tab) ============================= */
-const CATEGORY_OPTIONS = ['Attestation','TB','Immunization','Training','Background Check'];
+const CATEGORY_OPTIONS = ['Attestation','Health & Immunization','Immunization','Training','Background Check'];
 
 function importExpiryConfig(expiryDate){
   if(!expiryDate) return { expiryType:'none' };
@@ -869,7 +912,8 @@ function importFiles(files){
 function importTBSection(section, fallback, opts){
   opts = opts || {}; section = section || {};
   const out = {
-    enabled: !!section.enabled,
+    // A section that exists in the record counts as enabled unless it says otherwise.
+    enabled: section.enabled !== undefined ? !!section.enabled : Object.keys(section).length > 0,
     label: section.label !== undefined ? section.label : fallback.label,
     formId: (section.faas && section.faas.formId) || fallback.formId || '',
     ...importExpiryConfig(section.expiryDate),
@@ -895,22 +939,41 @@ function importRequirementJSON(json){
   const fb = defaultState();
 
   const category = json.category || '';
+  // docType decides the behavior builder. Older JSON from this tool had docType "ud" with category "TB".
+  let docType = ['ud','tb','influenza'].includes(json.docType) ? json.docType : 'ud';
+  if(docType === 'ud' && category.toLowerCase() === 'tb') docType = 'tb';
+  st.basic.docType = docType;
   if(CATEGORY_OPTIONS.includes(category)){
     st.basic.categorySelect = category; st.basic.categoryCustom = '';
   } else if(category){
     st.basic.categorySelect = 'Other'; st.basic.categoryCustom = category;
   }
   st.basic.name = json.name || '';
-  st.basic.shortname = json.shortname || '';
+  st.basic.shortname = json.shortname || json.shortName || '';
   st.basic.version = json.version || 0;
   st.basic.active = json.active !== undefined ? !!json.active : true;
   st.basic.required = json.required !== undefined ? !!json.required : true;
 
   const g = json.guidelines || {};
-  const isInstructorVariant = Array.isArray(g.clinicalInstructor);
-  st.guidelines.studentHTML = sanitizeHTML(isInstructorVariant ? (g.clinicalInstructor[0] || '')
-    : (Array.isArray(g.student) ? (g.student[0] || '') : ''));
-  st.guidelines.reviewerHTML = sanitizeHTML(Array.isArray(g.reviewer) ? (g.reviewer[0] || '') : '');
+  // A guidelines array can hold several strings — keep all of them, not just the first.
+  const joinGuidelines = arr => (Array.isArray(arr) ? arr : [arr])
+    .filter(x=> typeof x === 'string' && x.trim())
+    .reduce((acc, x)=> acc + (acc && !/<\/(ul|ol)>\s*$/i.test(acc) ? '<br>' : '') + x, '');
+  const studentRaw = joinGuidelines(g.student);
+  const instructorRaw = joinGuidelines(g.clinicalInstructor);
+  const hasStudentKey = Array.isArray(g.student), hasInstructorKey = Array.isArray(g.clinicalInstructor);
+  const bothAudiences = !!(studentRaw && instructorRaw);
+  const isInstructorVariant = hasInstructorKey && (!hasStudentKey || (!studentRaw && !!instructorRaw));
+  st.guidelines.studentHTML = sanitizeHTML(isInstructorVariant ? instructorRaw : studentRaw);
+  st.guidelines.instructorHTML = bothAudiences ? sanitizeHTML(instructorRaw) : '';
+  st.guidelines.reviewerHTML = sanitizeHTML(joinGuidelines(g.reviewer));
+  // Audience: from tags.userTypes when present, otherwise inferred from the guideline keys.
+  const normType = t => String(t).toLowerCase().replace(/[\s_-]+/g, '');
+  const taggedTypes = Array.isArray((json.tags || {}).userTypes) ? json.tags.userTypes.map(normType) : [];
+  const inferredTypes = bothAudiences ? ['student','clinicalinstructor']
+    : isInstructorVariant ? ['clinicalinstructor']
+    : hasStudentKey ? ['student'] : [];
+  const importedUserTypes = taggedTypes.length ? taggedTypes : inferredTypes;
   const templates = g.templates || {};
   st.guidelines.templates.collectionId = templates.collectionId || '';
   st.guidelines.templates.files = importFiles(templates.files);
@@ -920,7 +983,29 @@ function importRequirementJSON(json){
   st.guidelines.samples.files = importFiles(samples.files);
 
   const custom = json.custom || {};
-  if(st.basic.categorySelect === 'TB'){
+  if(docType === 'influenza'){
+    const importFlu = (section, fallback, isDecline) => {
+      section = section || {};
+      const out = {
+        enabled: section.enabled !== undefined ? !!section.enabled : fallback.enabled,
+        label: section.label !== undefined ? section.label : fallback.label,
+        formId: (section.faas && section.faas.formId) || '',
+        ...importExpiryConfig(section.expiryDate),
+        expiryLogic: importFieldPair(section.expiryLogic, fallback.expiryLogic),
+        src: importFieldPair(section.src, fallback.src),
+        text: importFieldPair(section.text, fallback.text)
+      };
+      if(!out.fixedDate) out.fixedDate = fallback.fixedDate;
+      if(isDecline) out.resultDate = importFieldPair(section.resultDate, fallback.resultDate);
+      else{
+        const doses = Array.isArray(section.doses) ? section.doses : [];
+        out.doses = fallback.doses.map((fd,i)=> ({ date: importFieldPair((doses[i] || {}).date, fd.date) }));
+      }
+      return out;
+    };
+    st.behavior.flu.vaccine = importFlu(json.vaccine, fb.behavior.flu.vaccine, false);
+    st.behavior.flu.decline = importFlu(json.decline, fb.behavior.flu.decline, true);
+  } else if(docType === 'tb'){
     // Either "custom" (default) or, if the customs toggle was on, "customs" holds the sections.
     const tbSource = json.customs || custom;
     st.behavior.tb.useCustomsKey = !!json.customs;
@@ -937,7 +1022,7 @@ function importRequirementJSON(json){
       enabledTop: custom.enabled !== undefined ? !!custom.enabled : true,
       label: custom.label || '',
       formId: isInstructorVariant ? '' : incomingFormId,
-      instructorFormId: isInstructorVariant ? incomingFormId : '',
+      instructorFormId: (isInstructorVariant || bothAudiences) ? incomingFormId : '',
       text: importFieldPair(custom.text, s.text),
       src: importFieldPair(custom.src, s.src),
       resultDate: importFieldPair(custom.resultDate, s.resultDate),
@@ -968,7 +1053,7 @@ function importRequirementJSON(json){
   } else {
     st.tags.usePublishOn = false;
   }
-  st.tags.userTypes = Array.isArray(tags.userTypes) ? tags.userTypes.slice() : [];
+  st.tags.userTypes = importedUserTypes;
   st.tags.preset = 'ongoing';
 
   st.workflow.keep = !!json.workflow;
