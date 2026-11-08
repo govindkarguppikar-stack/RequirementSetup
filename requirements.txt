@@ -1,1 +1,8 @@
 Flask>=2.3
+pymongo[srv]>=4.6
+openpyxl>=3.1
+# Windows-only convenience: save the DB connection in Windows Credential Manager (local use)
+keyring>=24.0; sys_platform == "win32"
+# Production servers
+gunicorn>=21.2; sys_platform != "win32"
+waitress>=3.0; sys_platform == "win32"

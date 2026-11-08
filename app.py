@@ -8,12 +8,19 @@ Then open: http://127.0.0.1:5000
 import copy
 import io
 import json
+import os
 import re
 import zipfile
 
 from flask import Flask, Response, jsonify, render_template, request
 
+from auth import init_auth
+from gather import bp as gather_bp
+from naming import safe_filename
+
 app = Flask(__name__)
+init_auth(app)
+app.register_blueprint(gather_bp)
 
 
 # ============================================================
@@ -24,7 +31,7 @@ def default_state():
         "basic": {
             "name": "", "shortname": "", "version": 0,
             "categorySelect": "Attestation", "categoryCustom": "",
-            "active": True, "required": True,
+            "active": True, "required": True, "docType": "ud",
         },
         "guidelines": {
             "studentHTML": "", "instructorHTML": "", "reviewerHTML": "",
@@ -40,6 +47,30 @@ def default_state():
                 "expiryType": "none", "expiryDays": 365,
                 "expiryLogic": {"required": False, "enabled": False, "label": "Expiration Date"},
                 "fixedDate": {"day": 1, "month": 1, "year": 2027},
+            },
+            "flu": {
+                "decline": {
+                    "enabled": True, "label": "Exemption Details", "formId": "",
+                    "expiryType": "none", "expiryDays": 0,
+                    "fixedDate": {"day": 1, "month": 1, "year": 2027},
+                    "expiryLogic": {"required": False, "enabled": False, "label": "Expiration Date"},
+                    "resultDate": {"required": False, "enabled": True, "label": "Date of Declination"},
+                    "src": {"required": False, "enabled": True, "label": "Upload"},
+                    "text": {"required": False, "enabled": False, "label": "Notes"},
+                },
+                "vaccine": {
+                    "enabled": True, "label": "Vaccination Details", "formId": "",
+                    "expiryType": "none", "expiryDays": 0,
+                    "fixedDate": {"day": 1, "month": 1, "year": 2027},
+                    "expiryLogic": {"required": False, "enabled": False, "label": "Expiration Date"},
+                    "src": {"required": False, "enabled": True, "label": "Upload"},
+                    "text": {"required": False, "enabled": False, "label": "Notes"},
+                    "doses": [
+                        {"date": {"required": False, "enabled": True, "label": "Dose 1 Date"}},
+                        {"date": {"required": False, "enabled": False, "label": "Dose 2 Date"}},
+                        {"date": {"required": False, "enabled": False, "label": "Dose 3 Date"}},
+                    ],
+                },
             },
             "tb": {
                 "useCustomsKey": False,
@@ -124,8 +155,20 @@ def get_category(state):
     return basic.get("categorySelect", "")
 
 
+DOC_TYPES = ("ud", "tb", "influenza")
+
+
+def get_doc_type(state):
+    value = (state["basic"].get("docType") or "ud").strip().lower()
+    return value if value in DOC_TYPES else "ud"
+
+
 def is_tb(state):
-    return get_category(state).strip().lower() == "tb"
+    return get_doc_type(state) == "tb"
+
+
+def is_influenza(state):
+    return get_doc_type(state) == "influenza"
 
 
 def expiry_date_for(cfg):
@@ -208,10 +251,13 @@ def build_standard_custom(state, audience=None):
 
 
 def build_tb_section(cfg, has_result_date=False, has_test_type=False, has_doses=False):
+    expiry_logic = dict(cfg["expiryLogic"])
+    if cfg.get("expiryType") == "userEntered":
+        expiry_logic.update(required=True, enabled=True)
     out = {
         "enabled": True,
         "expiryDate": expiry_date_for(cfg),
-        "expiryLogic": field_out_no_value(cfg["expiryLogic"]),
+        "expiryLogic": field_out_no_value(expiry_logic),
         "faas": {"formId": cfg.get("formId") or ""},
         "label": cfg.get("label") or "",
     }
@@ -240,6 +286,31 @@ def build_tb_custom(state):
         out["symptomScrn"] = build_tb_section(t["symptomScrn"], has_result_date=True)
     if t["vaccine"].get("enabled"):
         out["vaccine"] = build_tb_section(t["vaccine"], has_doses=True)
+    return out
+
+
+def build_flu_section(cfg, is_decline=False):
+    """Influenza 'decline' / 'vaccine' block (top-level keys, not under 'custom')."""
+    expiry_logic = dict(cfg["expiryLogic"])
+    if cfg.get("expiryType") == "userEntered":
+        expiry_logic.update(required=True, enabled=True)
+    if expiry_logic.get("required"):
+        expiry_logic["enabled"] = True
+    expiry = {"enabled": cfg.get("expiryType", "none") != "none", **expiry_date_for(cfg)}
+
+    out = {
+        "enabled": bool(cfg.get("enabled")),
+        "label": cfg.get("label") or "",
+        "text": field_out_no_value(cfg["text"]),
+        "src": field_out_no_value(cfg["src"]),
+        "expiryDate": expiry,
+        "expiryLogic": field_out_no_value(expiry_logic),
+    }
+    if is_decline:
+        out["resultDate"] = field_out_no_value(cfg["resultDate"])
+    out["faas"] = {"formId": cfg.get("formId") or ""}
+    if not is_decline:
+        out["doses"] = [{"date": field_out_no_value(d["date"])} for d in cfg.get("doses", [])]
     return out
 
 
@@ -317,7 +388,7 @@ def build_requirement_json(state, audience=None):
         "active": bool(state["basic"].get("active")),
         "tags": build_tags(state),
         "schema": "typeUD",
-        "docType": "ud",
+        "docType": get_doc_type(state),
         "shortname": state["basic"].get("shortname") or "",
         "name": state["basic"].get("name") or "",
         "version": int(state["basic"].get("version") or 0),
@@ -329,7 +400,13 @@ def build_requirement_json(state, audience=None):
     # For TB requirements, an opt-in toggle moves bloodTest/chestXray/symptomScrn/vaccine
     # out of "custom" into a sibling "customs" key instead. Off (default): unchanged
     # behavior — everything nested under "custom", same as non-TB requirements.
-    if is_tb(state):
+    if is_influenza(state):
+        flu = state["behavior"]["flu"]
+        obj["reportingContext"] = None
+        obj["dueOffsetDays"] = 0
+        obj["decline"] = build_flu_section(flu["decline"], is_decline=True)
+        obj["vaccine"] = build_flu_section(flu["vaccine"])
+    elif is_tb(state):
         tb_payload = build_tb_custom(state)
         if state["behavior"]["tb"].get("useCustomsKey"):
             obj["customs"] = tb_payload
@@ -372,10 +449,16 @@ def variants_for_download(state):
     return [(audience, build_requirement_json(state, audience=audience))]
 
 
-def slugify(value):
-    value = (value or "requirement").lower()
-    value = re.sub(r"[^a-z0-9]+", "-", value).strip("-")
-    return value or "requirement"
+def requirement_file_base(basic):
+    """File name base for a requirement download: its Name (the short name only as a fallback)."""
+    return safe_filename(basic.get("name") or basic.get("shortname"), fallback="Requirement")
+
+
+AUDIENCE_LABELS = {"student": "Student", "clinicalinstructor": "Clinical Instructor"}
+
+
+def audience_label(user_type):
+    return AUDIENCE_LABELS.get(user_type, safe_filename(user_type or "", fallback=""))
 
 
 # ============================================================
@@ -406,7 +489,7 @@ def api_download():
     variants = variants_for_download(state)
 
     basic = state.get("basic", {})
-    base_name = slugify(basic.get("shortname") or basic.get("name"))
+    base_name = requirement_file_base(basic)
 
     if len(variants) == 1:
         text = json.dumps(variants[0][1], indent=2)
@@ -418,7 +501,7 @@ def api_download():
     buf = io.BytesIO()
     with zipfile.ZipFile(buf, "w", zipfile.ZIP_DEFLATED) as zf:
         for user_type, obj in variants:
-            zf.writestr(f"{base_name}-{user_type}.json", json.dumps(obj, indent=2))
+            zf.writestr(f"{base_name} - {audience_label(user_type)}.json", json.dumps(obj, indent=2))
     buf.seek(0)
 
     resp = Response(buf.read(), mimetype="application/zip")
@@ -439,15 +522,16 @@ def api_download_all():
         for raw_state in tab_states:
             state = deep_merge(default_state(), raw_state or {})
             basic = state.get("basic", {})
-            base_name = slugify(basic.get("shortname") or basic.get("name"))
+            base_name = requirement_file_base(basic)
             variants = variants_for_download(state)
             multi = len(variants) > 1
             for user_type, obj in variants:
-                name = f"{base_name}-{user_type}" if multi and user_type else base_name
-                seen = used_names.get(name, 0)
-                used_names[name] = seen + 1
+                name = f"{base_name} - {audience_label(user_type)}" if multi and user_type else base_name
+                key = name.lower()   # Windows treats file names case-insensitively
+                seen = used_names.get(key, 0)
+                used_names[key] = seen + 1
                 if seen:
-                    name = f"{name}-{seen + 1}"
+                    name = f"{name} ({seen + 1})"
                 zf.writestr(f"{name}.json", json.dumps(obj, indent=2))
     buf.seek(0)
 
@@ -457,4 +541,16 @@ def api_download_all():
 
 
 if __name__ == "__main__":
-    app.run(debug=True, port=5000)
+    # Local development only. Debug mode (auto-reload + interactive debugger) is OFF unless
+    # FLASK_DEBUG=1, and the server only listens on this machine unless HOST is set.
+    # For real hosting use a production server instead, e.g.:  waitress-serve --port=8000 app:app
+    host = os.environ.get("HOST", "127.0.0.1")
+    if host in ("127.0.0.1", "localhost"):
+        # Only this machine can reach it, so no login is needed for local use.
+        # Any other host (or a production server) keeps the login enforced.
+        os.environ.setdefault("AUTH_DISABLED", "1")
+    app.run(
+        debug=os.environ.get("FLASK_DEBUG") == "1",
+        host=host,
+        port=int(os.environ.get("PORT", "5000")),
+    )
