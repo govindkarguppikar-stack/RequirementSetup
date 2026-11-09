@@ -14,6 +14,10 @@ import zipfile
 
 from flask import Flask, Response, jsonify, render_template, request
 
+from dotenv import load_dotenv
+
+load_dotenv()  # reads a local ".env" file (git-ignored); real environment variables still take priority
+
 from auth import init_auth
 from gather import bp as gather_bp
 from naming import safe_filename
