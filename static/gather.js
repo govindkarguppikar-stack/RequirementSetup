@@ -1,4 +1,4 @@
-﻿/* =========================================================================
+/* =========================================================================
    Database connection + Requirements Gathering views
    The connection string is sent to the Flask server only, which saves it in the
    OS credential store when "Remember" is on — it is never stored in the browser.
